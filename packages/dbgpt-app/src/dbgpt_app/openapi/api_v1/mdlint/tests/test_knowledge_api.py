@@ -32,6 +32,7 @@ class FakeKnowledgeService:
         *,
         connector: Any,
         data_source: str,
+        reviewed_by: str = "admin",
     ):
         self.approved = (database, entry_id, revision, connector, data_source)
         return {

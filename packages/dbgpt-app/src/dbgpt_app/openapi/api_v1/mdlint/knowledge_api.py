@@ -26,6 +26,10 @@ class KnowledgeEntryRequest(BaseModel):
     models: dict[str, list[str]]
     status: str | None = "draft"
     mdl_fingerprint: str | None = None
+    terms: list[dict[str, Any]] = Field(default_factory=list)
+    rule: dict[str, Any] | None = None
+    expected_result: dict[str, Any] | None = None
+    reuse_on_exact_match: bool = False
 
 
 class KnowledgeSaveRequest(BaseModel):
@@ -113,6 +117,7 @@ def approve_knowledge(payload: KnowledgeApproveRequest):
             payload.revision,
             connector=raw,
             data_source=infer_wren_data_source(raw),
+            reviewed_by=current_principal.get().get("username", "admin"),
         )
         return result(store)
     except Exception as exc:

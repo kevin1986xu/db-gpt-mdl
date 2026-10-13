@@ -192,6 +192,7 @@ thirdparty
 /configs/mdl.json
 /configs/mdl.databases/
 /configs/mdl.knowledge/
+/configs/mdl.knowledge_spaces/
 
 # Ignore awel DAG visualization files
 /examples/**/*.gv

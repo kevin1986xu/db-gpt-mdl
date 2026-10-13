@@ -107,6 +107,7 @@ class MDLIdentityMiddleware:
                 analyst_paths = {
                     "/api/v1/mdl/schema",
                     "/api/v1/mdl/query",
+                    "/api/v1/mdl/knowledge-spaces/search",
                     "/api/v1/mdl/logout",
                     "/api/v1/chat/react-agent",
                     "/api/v1/chat/dialogue/scenes",

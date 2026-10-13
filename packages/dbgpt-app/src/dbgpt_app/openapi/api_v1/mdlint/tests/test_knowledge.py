@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from dbgpt_app.openapi.api_v1.mdlint.analysis_rules import validate_analysis_rules
+from dbgpt_app.openapi.api_v1.mdlint.errors import MdlConfigError, MdlPolicyError
 from dbgpt_app.openapi.api_v1.mdlint.knowledge import (
     KnowledgeService,
     manifest_fingerprint,
@@ -117,6 +119,42 @@ def _business() -> dict[str, Any]:
     }
 
 
+def _glossary() -> dict[str, Any]:
+    return {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "kind": "glossary",
+        "title": "设备术语",
+        "content": "业务术语解释",
+        "terms": [{"term": "无人机", "meaning": "飞行设备", "aliases": ["飞行器"]}],
+        "models": {"device_registration": ["device_code"]},
+    }
+
+
+def _analysis_rule() -> dict[str, Any]:
+    return {
+        "id": "44444444-4444-4444-4444-444444444444",
+        "kind": "analysis_rule",
+        "title": "设备计数规则",
+        "content": "指标分析约束",
+        "rule": {
+            "metric": "设备数",
+            "conditions": ["去重设备编码"],
+            "guidance": "排除停用设备",
+            "checks": [
+                {
+                    "column": "设备数",
+                    "operator": "gte",
+                    "value": 0,
+                    "severity": "error",
+                    "message": "设备数不能为负",
+                }
+            ],
+            "report_requirements": ["注明统计口径"],
+        },
+        "models": {"device_registration": ["device_code"]},
+    }
+
+
 def _services(tmp_path: Path) -> tuple[MdlQueryService, KnowledgeService, Path]:
     manifest_path = tmp_path / "mdl.json"
     mdl = MdlQueryService(manifest_path=manifest_path)
@@ -200,6 +238,14 @@ def test_approve_validates_and_runtime_search_matches_alias_and_chinese(
         "content",
         "sql",
         "models",
+        "aliases",
+        "terms",
+        "rule",
+        "expected_result",
+        "reuse_on_exact_match",
+        "validation",
+        "exact_match",
+        "conflict",
     }
 
 
@@ -238,9 +284,8 @@ def test_runtime_search_ignores_low_signal_quantity_overlap(tmp_path: Path) -> N
 def test_runtime_search_preserves_long_sql_without_truncation(tmp_path: Path) -> None:
     _, knowledge, _ = _services(tmp_path)
     entry = _qa()
-    long_sql = (
-        'SELECT device_code FROM "device_registration" WHERE '
-        + " OR ".join(f"device_code = 'D{index:04d}'" for index in range(500))
+    long_sql = 'SELECT device_code FROM "device_registration" WHERE ' + " OR ".join(
+        f"device_code = 'D{index:04d}'" for index in range(500)
     )
     entry["sql"] = long_sql
     entry["content"] = "完整 SQL 不能被知识库检索层截断。"
@@ -387,3 +432,251 @@ def test_path_traversal_database_name_uses_hash(tmp_path: Path) -> None:
     assert path.name.endswith(".json")
     assert "/" not in path.name
     assert ".." not in path.name
+
+
+def test_structured_knowledge_is_kind_specific_and_normalized(tmp_path: Path) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    saved = knowledge.save("drone_manage", [_glossary(), _analysis_rule()], revision=0)
+
+    assert saved["entries"][0]["terms"][0]["aliases"] == ["飞行器"]
+    assert saved["entries"][1]["rule"]["metric"] == "设备数"
+    assert saved["entries"][1]["rule"]["checks"][0]["operator"] == "gte"
+    assert saved["entries"][1]["rule"]["report_requirements"] == ["注明统计口径"]
+    with pytest.raises(MdlConfigError, match="Glossary terms"):
+        knowledge.save(
+            "drone_manage",
+            [_qa() | {"terms": [{"term": "x", "meaning": "y"}]}],
+            revision=saved["revision"],
+        )
+    with pytest.raises(MdlConfigError, match="Analysis rules"):
+        knowledge.save(
+            "drone_manage",
+            [_glossary() | {"rule": {"metric": "x"}}],
+            revision=saved["revision"],
+        )
+
+
+def test_duplicate_uuid_spellings_are_rejected_atomically(tmp_path: Path) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    first = _qa()
+    duplicate = _business() | {"id": first["id"].upper()}
+
+    with pytest.raises(MdlConfigError, match="Duplicate"):
+        knowledge.save("drone_manage", [first, duplicate], revision=0)
+    assert knowledge.load("drone_manage")["entries"] == []
+
+
+def test_expected_result_validation_and_server_metadata_lifecycle(
+    tmp_path: Path,
+) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    entry = _qa() | {
+        "expected_result": {"columns": ["ok"], "rows": [[1]]},
+        "reuse_on_exact_match": True,
+    }
+    saved = knowledge.save("drone_manage", [entry], revision=0)
+    connector = FakeConnector()
+    approved = knowledge.approve(
+        "drone_manage",
+        entry["id"],
+        saved["revision"],
+        connector=connector,
+        data_source="duckdb",
+        reviewed_by="reviewer",
+    )
+    record = approved["entries"][0]
+    assert record["validation"]["mode"] == "result_checked"
+    assert record["validation"]["reviewed_by"] == "reviewer"
+
+    reloaded = knowledge.load("drone_manage", include_stale=True)
+    assert reloaded["entries"][0]["validation"]["reviewed_by"] == "reviewer"
+    unchanged = knowledge.save(
+        "drone_manage",
+        [record | {"validation": {"forged": True}}],
+        revision=approved["revision"],
+    )
+    assert unchanged["entries"][0]["validation"]["reviewed_by"] == "reviewer"
+
+    edited = knowledge.save(
+        "drone_manage",
+        [record | {"expected_result": {"columns": ["ok"], "rows": [[2]]}}],
+        revision=unchanged["revision"],
+    )
+    assert edited["entries"][0]["status"] == "draft"
+    assert "validation" not in edited["entries"][0]
+
+
+def test_exact_reuse_requires_opt_in_and_rejects_conflicts(tmp_path: Path) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    first = _qa() | {"reuse_on_exact_match": True}
+    saved = knowledge.save("drone_manage", [first], revision=0)
+    approved = knowledge.approve(
+        "drone_manage", first["id"], saved["revision"], data_source="duckdb"
+    )
+    assert (
+        knowledge.resolve_exact_sql(
+            "drone_manage", "查询无人机数量？", "admin", "admin", entry_id=first["id"]
+        )
+        == first["sql"]
+    )
+
+    second = _qa("55555555-5555-5555-5555-555555555555") | {
+        "sql": 'SELECT COUNT(*) AS count FROM "device_registration"',
+        "reuse_on_exact_match": True,
+    }
+    saved2 = knowledge.save(
+        "drone_manage",
+        [approved["entries"][0], second],
+        revision=approved["revision"],
+    )
+    knowledge.approve(
+        "drone_manage",
+        second["id"],
+        saved2["revision"],
+        data_source="duckdb",
+    )
+    matches = knowledge.search("drone_manage", "查询无人机数量", "admin", "admin")
+    assert all(match["conflict"] for match in matches if match["exact_match"])
+    with pytest.raises(MdlPolicyError, match="different semantics"):
+        knowledge.resolve_exact_sql("drone_manage", "查询无人机数量", "admin", "admin")
+
+
+def test_executable_rule_roundtrip_and_edit_demotes_approval(tmp_path: Path) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    rule = _analysis_rule()
+    rule["rule"]["checks"] = [
+        {
+            "column": "count",
+            "operator": "gte",
+            "value": 0,
+            "severity": "error",
+            "message": "设备数不能为负",
+        }
+    ]
+    rule["rule"]["report_requirements"] = ["注明去重口径与统计范围"]
+    saved = knowledge.save("drone_manage", [rule], revision=0)
+    approved = knowledge.approve("drone_manage", rule["id"], saved["revision"])
+    loaded = knowledge.load("drone_manage")["entries"][0]
+    assert loaded["rule"]["checks"][0]["value"] == 0
+    assert loaded["rule"]["report_requirements"] == ["注明去重口径与统计范围"]
+    loaded["rule"]["checks"][0]["value"] = 1
+    edited = knowledge.save("drone_manage", [loaded], approved["revision"])
+    assert edited["entries"][0]["status"] == "draft"
+
+
+def test_executable_rule_invalid_operator_rejected_before_write(
+    tmp_path: Path,
+) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    rule = _analysis_rule()
+    rule["rule"]["checks"] = [
+        {"column": "count", "operator": "exec", "value": "malicious()"}
+    ]
+    with pytest.raises(MdlConfigError, match="operator"):
+        knowledge.save("drone_manage", [rule], revision=0)
+    assert knowledge.load("drone_manage")["entries"] == []
+
+
+def test_analysis_rule_checks_validate_query_results(tmp_path: Path) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    rule = _analysis_rule()
+    rule["rule"]["checks"] = [
+        {"column": "count", "operator": "gte", "value": 1, "message": "设备数至少为 1"}
+    ]
+    saved = knowledge.save("drone_manage", [rule], revision=0)
+    approved = knowledge.approve(
+        "drone_manage",
+        rule["id"],
+        saved["revision"],
+        data_source="duckdb",
+    )
+    record = approved["entries"][0]
+
+    passed = validate_analysis_rules([record], ["count"], [(2,)])
+    failed = validate_analysis_rules([record], ["count"], [(0,)])
+
+    assert passed["status"] == "passed"
+    assert failed["status"] == "failed"
+    assert failed["checks"][0]["failed_rows"] == [1]
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_expected_result_rejects_non_finite_values(tmp_path, value):
+    _, knowledge, _ = _services(tmp_path)
+    with pytest.raises(MdlConfigError, match="scalar"):
+        knowledge.save(
+            "drone_manage",
+            [_qa() | {"expected_result": {"columns": ["n"], "rows": [[value]]}}],
+            0,
+        )
+
+
+def test_glossary_aliases_expand_qa_retrieval(tmp_path: Path) -> None:
+    _, knowledge, _ = _services(tmp_path)
+    qa = _qa()
+    qa["question"] = "查询无人机数量"
+    glossary = _glossary()
+    glossary["terms"][0]["term"] = "无人机"
+    glossary["terms"][0]["aliases"] = ["飞行器"]
+    saved = knowledge.save("drone_manage", [qa, glossary], revision=0)
+    saved = knowledge.approve(
+        "drone_manage",
+        qa["id"],
+        saved["revision"],
+        connector=FakeConnector(),
+        data_source="duckdb",
+    )
+    knowledge.approve(
+        "drone_manage",
+        glossary["id"],
+        saved["revision"],
+        connector=FakeConnector(),
+        data_source="duckdb",
+    )
+
+    matches = knowledge.search(
+        "drone_manage",
+        "飞行器数量是多少",
+        user_id="admin",
+        role="admin",
+        data_source="duckdb",
+        top_k=2,
+    )
+
+    assert matches[0]["title"] == "无人机数量"
+
+
+def test_rule_execution_can_retrieve_all_matches_beyond_prompt_limit(tmp_path):
+    import uuid
+
+    _, knowledge, _ = _services(tmp_path)
+    entries = [_business() | {"id": str(uuid.uuid4())} for _ in range(21)]
+    saved = knowledge.save("drone_manage", entries, 0)
+    for entry in entries:
+        saved = knowledge.approve("drone_manage", entry["id"], saved["revision"])
+    assert (
+        len(knowledge.search("drone_manage", "设备状态", "admin", "admin", top_k=None))
+        == 21
+    )
+    assert (
+        len(knowledge.search("drone_manage", "设备状态", "admin", "admin", top_k=20))
+        == 20
+    )
+
+
+def test_sql_literal_case_and_spaces_are_preserved_in_conflict_detection(tmp_path):
+    _, knowledge, _ = _services(tmp_path)
+    first = _qa() | {
+        "reuse_on_exact_match": True,
+        "sql": "SELECT COUNT(*) FROM device_registration WHERE status='Active  OK'",
+        "models": {"device_registration": ["status"]},
+    }
+    second = first | {
+        "id": "66666666-6666-6666-6666-666666666666",
+        "sql": "SELECT COUNT(*) FROM device_registration WHERE status='active OK'",
+    }
+    saved = knowledge.save("drone_manage", [first, second], 0)
+    for entry in [first, second]:
+        saved = knowledge.approve("drone_manage", entry["id"], saved["revision"])
+    with pytest.raises(MdlPolicyError, match="different semantics"):
+        knowledge.resolve_exact_sql("drone_manage", first["question"], "admin", "admin")

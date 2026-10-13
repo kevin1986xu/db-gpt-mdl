@@ -15,12 +15,14 @@ from .auth import (
     initialize_credentials,
 )
 from .knowledge_api import router as knowledge_router
+from .knowledge_space_api import router as knowledge_space_router
 from .models import normalize_name
 from .service import get_service
 from .wren_adapter import WrenPlanner
 
 router = APIRouter(prefix="/v1/mdl")
 router.include_router(knowledge_router)
+router.include_router(knowledge_space_router)
 
 
 class LoginRequest(BaseModel):

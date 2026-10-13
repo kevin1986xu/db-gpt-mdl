@@ -128,9 +128,45 @@ export type MdlQueryResponse = {
   logical_sql?: string;
 };
 
-export type MdlKnowledgeKind = 'qa_sql' | 'business_rule';
+export type MdlKnowledgeKind = 'qa_sql' | 'business_rule' | 'glossary' | 'analysis_rule';
 
 export type MdlKnowledgeStatus = 'draft' | 'approved';
+
+export type MdlKnowledgeValidationMode = 'wren_plan' | 'wren_plan_explain' | 'result_checked' | string;
+
+export type MdlKnowledgeValidation = {
+  mode: MdlKnowledgeValidationMode;
+  data_source?: string;
+  validated_at?: string;
+  reviewed_by?: string;
+};
+
+export type MdlKnowledgeTerm = {
+  term: string;
+  meaning: string;
+  aliases: string[];
+};
+
+export type MdlKnowledgeRule = {
+  metric: string;
+  conditions: string[];
+  guidance: string;
+  checks?: MdlKnowledgeRuleCheck[];
+  report_requirements?: string[];
+};
+
+export type MdlKnowledgeRuleCheck = {
+  column: string;
+  operator: string;
+  value?: string | number | boolean | null | Array<string | number | boolean | null>;
+  severity: 'error' | 'warning';
+  message: string;
+};
+
+export type MdlKnowledgeExpectedResult = {
+  columns: string[];
+  rows: Array<Array<string | number | boolean | null>>;
+};
 
 export type MdlKnowledgeEntry = {
   id: string;
@@ -141,9 +177,17 @@ export type MdlKnowledgeEntry = {
   sql?: string;
   aliases: string[];
   models: Record<string, string[]>;
+  terms?: MdlKnowledgeTerm[];
+  rule?: MdlKnowledgeRule;
+  expected_result?: MdlKnowledgeExpectedResult;
+  reuse_on_exact_match?: boolean;
   status: MdlKnowledgeStatus;
   mdl_fingerprint?: string;
   stale?: boolean;
+  validation?: MdlKnowledgeValidation;
+  exact_match?: boolean;
+  conflict?: boolean;
+  score?: number;
 };
 
 export type MdlKnowledgeCorpus = {
@@ -172,11 +216,34 @@ export type MdlKnowledgeSearchPayload = {
 
 export type MdlKnowledgeSearchMatch = MdlKnowledgeEntry & {
   score?: number;
+  exact_match?: boolean;
+  conflict?: boolean;
 };
 
 export type MdlKnowledgeSearchResponse = {
   database?: string;
   matches: MdlKnowledgeSearchMatch[];
+};
+
+export type MdlKnowledgeSpaceBinding = {
+  id?: string;
+  title: string;
+  space_name: string;
+  description: string;
+  models: Record<string, string[]>;
+  users: string[];
+  roles: string[];
+  status: MdlKnowledgeStatus;
+  mdl_fingerprint?: string;
+  space_fingerprint?: string;
+  stale?: boolean;
+  validation?: MdlKnowledgeValidation;
+};
+
+export type MdlKnowledgeSpaceCorpus = {
+  database: string;
+  revision: number;
+  spaces: MdlKnowledgeSpaceBinding[];
 };
 
 export type MdlSessionUser = {
@@ -232,3 +299,15 @@ export const approveMdlKnowledge = (data: MdlKnowledgeApprovePayload) =>
 
 export const searchMdlKnowledge = (data: MdlKnowledgeSearchPayload) =>
   POST<MdlKnowledgeSearchPayload, MdlKnowledgeSearchResponse>('/api/v1/mdl/knowledge/search', data);
+
+export const getMdlKnowledgeSpaces = (database: string) =>
+  GET<{ database: string }, MdlKnowledgeSpaceCorpus>('/api/v1/mdl/knowledge-spaces', { database });
+
+export const saveMdlKnowledgeSpaces = (data: MdlKnowledgeSpaceCorpus) =>
+  PUT<MdlKnowledgeSpaceCorpus, MdlKnowledgeSpaceCorpus>('/api/v1/mdl/knowledge-spaces', data);
+
+export const approveMdlKnowledgeSpace = (data: { database: string; revision: number; id: string }) =>
+  POST<typeof data, MdlKnowledgeSpaceCorpus>('/api/v1/mdl/knowledge-spaces/approve', data);
+
+export const searchMdlKnowledgeSpaces = (data: { database: string }) =>
+  POST<typeof data, { database: string; spaces: string[] }>('/api/v1/mdl/knowledge-spaces/search', data);

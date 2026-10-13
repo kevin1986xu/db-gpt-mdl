@@ -1,7 +1,9 @@
 import {
   MdlKnowledgeCorpus,
   MdlKnowledgeEntry,
+  MdlKnowledgeExpectedResult,
   MdlKnowledgeKind,
+  MdlKnowledgeRuleCheck,
   MdlKnowledgeSearchMatch,
   MdlModel,
   approveMdlKnowledge,
@@ -20,9 +22,25 @@ import {
   SaveOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Card, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import MdlKnowledgeSpaces from './MdlKnowledgeSpaces';
 
 type Props = {
   database?: string;
@@ -39,9 +57,98 @@ type KnowledgeFormValues = {
   aliasesText?: string;
   modelNames: string[];
   fieldsByModel?: Record<string, string[]>;
+  terms?: Array<{ term?: string; meaning?: string; aliasesText?: string }>;
+  ruleMetric?: string;
+  ruleConditionsText?: string;
+  ruleGuidance?: string;
+  ruleReportRequirementsText?: string;
+  ruleChecks?: Array<{
+    column: string;
+    operator: string;
+    valueText?: string;
+    severity?: 'error' | 'warning';
+    message?: string;
+  }>;
+  expectedResultColumnsText?: string;
+  expectedResultRowsText?: string;
+  reuseOnExactMatch?: boolean;
 };
 
 const emptyCorpus: MdlKnowledgeCorpus = { entries: [] };
+
+const checkOperators = [
+  { value: 'eq', label: '等于' },
+  { value: 'ne', label: '不等于' },
+  { value: 'gt', label: '大于' },
+  { value: 'gte', label: '大于等于' },
+  { value: 'lt', label: '小于' },
+  { value: 'lte', label: '小于等于' },
+  { value: 'between', label: '处于范围内' },
+  { value: 'in', label: '属于枚举集合' },
+  { value: 'not_null', label: '非空' },
+  { value: 'is_null', label: '为空' },
+];
+
+function parseRuleChecks(values: KnowledgeFormValues): MdlKnowledgeRuleCheck[] {
+  const parseScalar = (text: string): string | number | boolean | null => {
+    const trimmed = text.trim();
+    try {
+      const value: unknown = JSON.parse(trimmed);
+      if (
+        value === null ||
+        typeof value === 'string' ||
+        typeof value === 'boolean' ||
+        (typeof value === 'number' && Number.isFinite(value))
+      )
+        return value;
+    } catch {
+      /* Plain text enum values do not need quotes. */
+    }
+    return trimmed;
+  };
+  return (values.ruleChecks ?? []).map(check => {
+    const result: MdlKnowledgeRuleCheck = {
+      column: check.column.trim(),
+      operator: check.operator,
+      severity: check.severity ?? 'error',
+      message: check.message?.trim() ?? '',
+    };
+    if (['not_null', 'is_null'].includes(check.operator)) return result;
+    if (!check.valueText?.trim()) throw new Error('请填写每个比较断言的期望值');
+    if (['between', 'in'].includes(check.operator)) {
+      if (check.valueText.trim().startsWith('[')) {
+        const parsed: unknown = JSON.parse(check.valueText);
+        if (
+          !Array.isArray(parsed) ||
+          parsed.some(
+            value =>
+              value !== null &&
+              typeof value !== 'string' &&
+              typeof value !== 'boolean' &&
+              !(typeof value === 'number' && Number.isFinite(value)),
+          )
+        ) {
+          throw new Error('枚举期望值只能包含文字、数字、布尔值或空值');
+        }
+        result.value = parsed;
+      } else {
+        result.value = check.valueText.split(/[,，\n]/).map(parseScalar);
+      }
+      if (
+        check.operator === 'between' &&
+        (result.value.length !== 2 || result.value.some(value => typeof value !== 'number'))
+      ) {
+        throw new Error('范围断言需要两个数字，例如：0,100');
+      }
+    } else {
+      result.value = parseScalar(check.valueText);
+      if (['gt', 'gte', 'lt', 'lte'].includes(check.operator) && typeof result.value !== 'number') {
+        throw new Error('大小比较断言需要数值');
+      }
+    }
+    return result;
+  });
+}
 
 function modelLabel(model: MdlModel) {
   return model.display_name || model.name;
@@ -71,24 +178,119 @@ function normalizeEntries(entries?: MdlKnowledgeEntry[]) {
     ...entry,
     aliases: entry.aliases ?? [],
     models: entry.models ?? {},
+    terms: entry.terms ?? [],
+    rule: entry.rule,
     status: entry.status ?? 'draft',
   }));
 }
 
 function toSaveEntry(entry: MdlKnowledgeEntry): MdlKnowledgeEntry {
-  const { stale: _stale, ...payload } = entry;
-  return payload;
+  const {
+    stale: _stale,
+    validation: _validation,
+    exact_match: _exactMatch,
+    conflict: _conflict,
+    score: _score,
+    ...payload
+  } = entry;
+  return {
+    ...payload,
+    terms: entry.kind === 'glossary' ? (entry.terms ?? []) : [],
+    rule: entry.kind === 'analysis_rule' ? entry.rule : undefined,
+  };
 }
 
 function createEntryId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    if (typeof crypto.getRandomValues === 'function') {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+  }
+  const hex = `${Date.now().toString(16).padStart(12, '0')}${Math.random().toString(16).slice(2)}${Math.random()
+    .toString(16)
+    .slice(2)}`
+    .padEnd(32, '0')
+    .slice(0, 32)
+    .split('');
+  hex[12] = '4';
+  hex[16] = '8';
+  const value = hex.join('');
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+const kindLabels: Record<MdlKnowledgeKind, string> = {
+  qa_sql: '问答 SQL',
+  business_rule: '业务口径',
+  glossary: '字典术语',
+  analysis_rule: '分析规则',
+};
+
+function kindLabel(kind: MdlKnowledgeKind) {
+  return kindLabels[kind] ?? kind;
 }
 
 function statusTag(entry: MdlKnowledgeEntry) {
   if (entry.stale) return <Tag color='orange'>需重新审核</Tag>;
   if (entry.status === 'approved') return <Tag color='green'>已审核</Tag>;
   return <Tag>草稿</Tag>;
+}
+
+function validationTag(entry: MdlKnowledgeEntry) {
+  const mode = entry.validation?.mode;
+  if (!mode) return <Tag>未验证</Tag>;
+  if (mode === 'result_checked') return <Tag color='green'>结果已校验</Tag>;
+  if (mode === 'wren_plan_explain') return <Tag color='blue'>计划已解释</Tag>;
+  if (mode === 'wren_plan') return <Tag color='cyan'>计划已校验</Tag>;
+  return <Tag color='blue'>{mode}</Tag>;
+}
+
+function splitLines(value?: string) {
+  return (value ?? '')
+    .split(/\r?\n/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function joinLines(value?: string[]) {
+  return (value ?? []).join('\n');
+}
+
+function parseExpectedResult(values: KnowledgeFormValues): MdlKnowledgeExpectedResult | undefined {
+  const columns = splitAliases(values.expectedResultColumnsText);
+  const rawRows = values.expectedResultRowsText?.trim();
+  if (!columns.length && !rawRows) return undefined;
+  if (!columns.length || !rawRows) {
+    throw new Error('期望结果需要同时填写列名和 JSON 行数据。');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawRows);
+  } catch {
+    throw new Error('期望结果行数据必须是合法 JSON 数组。');
+  }
+  if (!Array.isArray(parsed) || parsed.length > 100 || !parsed.every(row => Array.isArray(row))) {
+    throw new Error('期望结果必须是最多 100 行的二维 JSON 数组。');
+  }
+  const rows = parsed as unknown[][];
+  if (
+    rows.some(
+      row =>
+        row.length !== columns.length ||
+        row.some(
+          value =>
+            value !== null && typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean',
+        ),
+    )
+  ) {
+    throw new Error('期望结果每行的列数必须与列名一致，单元格只能是字符串、数字、布尔值或 null。');
+  }
+  return { columns, rows: rows as MdlKnowledgeExpectedResult['rows'] };
 }
 
 function downloadJson(filename: string, value: unknown) {
@@ -225,7 +427,11 @@ function MdlKnowledge({ database, models }: Props) {
     );
     if (requestDatabase !== activeDatabase.current || generation !== requestGeneration.current) return undefined;
     if (error || !response?.success || !saved) {
-      message.error('知识保存失败，当前编辑已保留，请核对版本后重试。');
+      const detail =
+        (response as { err_msg?: string; detail?: string } | null)?.err_msg ??
+        (response as { err_msg?: string; detail?: string } | null)?.detail ??
+        (error instanceof Error ? error.message : '');
+      message.error(detail || '知识保存失败，当前编辑已保留，请核对版本后重试。');
       return undefined;
     }
     const normalized = normalizeEntries(saved.entries);
@@ -253,7 +459,7 @@ function MdlKnowledge({ database, models }: Props) {
   const openCreate = () => {
     setEditingId(undefined);
     form.resetFields();
-    form.setFieldsValue({ kind: 'qa_sql', modelNames: [] });
+    form.setFieldsValue({ kind: 'qa_sql', modelNames: [], terms: [], reuseOnExactMatch: false });
     setModalOpen(true);
   };
 
@@ -270,6 +476,22 @@ function MdlKnowledge({ database, models }: Props) {
       aliasesText: joinAliases(entry.aliases),
       modelNames: Object.keys(entry.models ?? {}),
       fieldsByModel: entry.models,
+      terms: (entry.terms ?? []).map(term => ({
+        term: term.term,
+        meaning: term.meaning,
+        aliasesText: joinAliases(term.aliases),
+      })),
+      ruleMetric: entry.rule?.metric,
+      ruleConditionsText: joinLines(entry.rule?.conditions),
+      ruleGuidance: entry.rule?.guidance,
+      ruleReportRequirementsText: joinLines(entry.rule?.report_requirements),
+      ruleChecks: (entry.rule?.checks ?? []).map(check => ({
+        ...check,
+        valueText: check.value === undefined ? undefined : JSON.stringify(check.value),
+      })),
+      expectedResultColumnsText: joinAliases(entry.expected_result?.columns),
+      expectedResultRowsText: entry.expected_result ? JSON.stringify(entry.expected_result.rows, null, 2) : undefined,
+      reuseOnExactMatch: entry.reuse_on_exact_match ?? false,
     });
     setModalOpen(true);
   };
@@ -291,6 +513,15 @@ function MdlKnowledge({ database, models }: Props) {
 
   const handleSubmitEntry = async () => {
     const values = await form.validateFields();
+    let expectedResult: MdlKnowledgeExpectedResult | undefined;
+    let ruleChecks: MdlKnowledgeRuleCheck[] = [];
+    try {
+      expectedResult = values.kind === 'qa_sql' ? parseExpectedResult(values) : undefined;
+      if (values.kind === 'analysis_rule') ruleChecks = parseRuleChecks(values);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '期望结果格式不正确');
+      return;
+    }
     const bindings = values.modelNames.reduce<Record<string, string[]>>((acc, modelName) => {
       const fields = values.fieldsByModel?.[modelName] ?? [];
       if (fields.length > 0) acc[modelName] = fields;
@@ -298,6 +529,14 @@ function MdlKnowledge({ database, models }: Props) {
     }, {});
     if (Object.keys(bindings).length === 0 || Object.keys(bindings).length !== values.modelNames.length) {
       message.warning('请为每个绑定模型至少选择一个字段');
+      return;
+    }
+    if (values.kind === 'glossary' && !values.terms?.length) {
+      message.warning('至少添加一个术语条目');
+      return;
+    }
+    if (values.kind === 'analysis_rule' && !values.ruleMetric?.trim()) {
+      message.warning('请输入分析指标');
       return;
     }
     const nextEntry: MdlKnowledgeEntry = {
@@ -309,6 +548,26 @@ function MdlKnowledge({ database, models }: Props) {
       sql: values.kind === 'qa_sql' ? values.sql?.trim() : undefined,
       aliases: splitAliases(values.aliasesText),
       models: bindings,
+      terms:
+        values.kind === 'glossary'
+          ? (values.terms ?? []).map(term => ({
+              term: term.term?.trim() ?? '',
+              meaning: term.meaning?.trim() ?? '',
+              aliases: splitAliases(term.aliasesText),
+            }))
+          : [],
+      rule:
+        values.kind === 'analysis_rule'
+          ? {
+              metric: values.ruleMetric?.trim() ?? '',
+              conditions: splitLines(values.ruleConditionsText),
+              guidance: values.ruleGuidance?.trim() ?? '',
+              checks: ruleChecks,
+              report_requirements: splitLines(values.ruleReportRequirementsText),
+            }
+          : undefined,
+      expected_result: expectedResult,
+      reuse_on_exact_match: values.kind === 'qa_sql' ? values.reuseOnExactMatch === true : false,
       status: 'draft',
     };
     setEntries(prev => {
@@ -378,11 +637,12 @@ function MdlKnowledge({ database, models }: Props) {
     {
       title: '知识',
       dataIndex: 'title',
+      width: 230,
       render: (_, entry) => (
         <div>
           <div className='font-medium'>{entry.title}</div>
           <div className='text-xs text-gray-400'>
-            {entry.kind === 'qa_sql' ? '问答 SQL' : '业务口径'}
+            {kindLabel(entry.kind)}
             {entry.question ? ` · ${entry.question}` : ''}
           </div>
         </div>
@@ -394,7 +654,13 @@ function MdlKnowledge({ database, models }: Props) {
       render: (_, entry) => statusTag(entry),
     },
     {
+      title: '校验',
+      width: 125,
+      render: (_, entry) => validationTag(entry),
+    },
+    {
       title: '绑定模型字段',
+      width: 210,
       render: (_, entry) => (
         <Space wrap size={[4, 4]}>
           {Object.entries(entry.models).map(([modelName, fields]) => (
@@ -408,11 +674,13 @@ function MdlKnowledge({ database, models }: Props) {
     {
       title: '别名',
       dataIndex: 'aliases',
+      width: 220,
       render: value => (value?.length ? value.join(' / ') : '-'),
     },
     {
       title: 'SQL 示例',
       dataIndex: 'sql',
+      width: 300,
       ellipsis: true,
       render: value => value || '-',
     },
@@ -459,6 +727,11 @@ function MdlKnowledge({ database, models }: Props) {
       render: (_, entry) => (
         <div>
           <div className='font-medium'>{entry.title}</div>
+          <Space size={4} wrap>
+            <Tag>{kindLabel(entry.kind)}</Tag>
+            {entry.exact_match && <Tag color='green'>精确问法</Tag>}
+            {entry.conflict && <Tag color='red'>命中冲突</Tag>}
+          </Space>
           <Typography.Paragraph className='!mb-0 text-xs text-gray-500' ellipsis={{ rows: 2 }}>
             {entry.content}
           </Typography.Paragraph>
@@ -474,6 +747,11 @@ function MdlKnowledge({ database, models }: Props) {
       title: '状态',
       width: 110,
       render: (_, entry) => statusTag(entry),
+    },
+    {
+      title: '校验',
+      width: 125,
+      render: (_, entry) => validationTag(entry),
     },
     {
       title: 'SQL',
@@ -529,6 +807,7 @@ function MdlKnowledge({ database, models }: Props) {
           loading={loading}
           dataSource={entries}
           columns={columns}
+          scroll={{ x: 1400 }}
           pagination={{ pageSize: 8 }}
           locale={{ emptyText: <Empty description={database ? '暂无知识条目' : '请先选择数据源'} /> }}
         />
@@ -562,6 +841,8 @@ function MdlKnowledge({ database, models }: Props) {
         />
       </Card>
 
+      <MdlKnowledgeSpaces database={database} models={models} />
+
       <Modal
         title={editingId ? '编辑知识条目' : '新增知识条目'}
         open={modalOpen}
@@ -572,14 +853,9 @@ function MdlKnowledge({ database, models }: Props) {
         onCancel={() => setModalOpen(false)}
         onOk={handleSubmitEntry}
       >
-        <Form form={form} layout='vertical' initialValues={{ kind: 'qa_sql', modelNames: [] }}>
+        <Form form={form} layout='vertical' initialValues={{ kind: 'qa_sql', modelNames: [], terms: [] }}>
           <Form.Item name='kind' label='类型' rules={[{ required: true, message: '请选择类型' }]}>
-            <Select
-              options={[
-                { label: '问答 SQL', value: 'qa_sql' },
-                { label: '业务口径', value: 'business_rule' },
-              ]}
-            />
+            <Select options={[...Object.entries(kindLabels).map(([value, label]) => ({ label, value }))]} />
           </Form.Item>
           <Form.Item name='title' label='标题' rules={[{ required: true, message: '请输入标题' }]}>
             <Input placeholder='例如：活跃无人机数量口径' />
@@ -594,13 +870,187 @@ function MdlKnowledge({ database, models }: Props) {
           <Form.Item name='content' label='口径 / 内容' rules={[{ required: true, message: '请输入口径或内容' }]}>
             <Input.TextArea rows={4} placeholder='描述适用范围、过滤条件、指标口径和注意事项，不填写固定数值答案' />
           </Form.Item>
-          <Form.Item
-            name='sql'
-            label='SQL 示例'
-            rules={selectedKind === 'qa_sql' ? [{ required: true, message: '请输入 SQL 示例' }] : undefined}
-          >
-            <Input.TextArea rows={4} placeholder='select count(*) from device_registration ...' />
-          </Form.Item>
+          {selectedKind === 'qa_sql' && (
+            <Form.Item
+              name='sql'
+              label='SQL 示例'
+              rules={selectedKind === 'qa_sql' ? [{ required: true, message: '请输入 SQL 示例' }] : undefined}
+            >
+              <Input.TextArea rows={4} placeholder='select count(*) from device_registration ...' />
+            </Form.Item>
+          )}
+          {selectedKind === 'qa_sql' && (
+            <>
+              <Form.Item name='reuseOnExactMatch' valuePropName='checked'>
+                <Checkbox>精确问法复用审核 SQL</Checkbox>
+              </Form.Item>
+              <Typography.Paragraph type='secondary' className='!mb-3 text-xs'>
+                完整问题或别名在规范化标点后完全一致，且没有不同审核 SQL 的冲突时，运行时才会复用审核口径。
+              </Typography.Paragraph>
+              <Form.Item label='期望结果列名'>
+                <Form.Item name='expectedResultColumnsText' noStyle>
+                  <Input placeholder='例如：设备数量, 状态' />
+                </Form.Item>
+              </Form.Item>
+              <Form.Item
+                name='expectedResultRowsText'
+                label='期望结果行（JSON）'
+                rules={[
+                  {
+                    validator: async (_, value: string | undefined) => {
+                      if (!value?.trim()) return;
+                      try {
+                        const parsed = JSON.parse(value);
+                        if (
+                          !Array.isArray(parsed) ||
+                          parsed.length > 100 ||
+                          parsed.some(
+                            (row: unknown) =>
+                              !Array.isArray(row) ||
+                              row.some(
+                                (cell: unknown) =>
+                                  cell !== null &&
+                                  typeof cell !== 'string' &&
+                                  typeof cell !== 'number' &&
+                                  typeof cell !== 'boolean',
+                              ),
+                          )
+                        ) {
+                          throw new Error();
+                        }
+                      } catch {
+                        throw new Error('请输入最多 100 行的二维 JSON 数组，单元格只能是标量或 null');
+                      }
+                    },
+                  },
+                ]}
+              >
+                <Input.TextArea rows={4} placeholder={'例如：[[12, "active"], [8, "paused"]]'} spellCheck={false} />
+              </Form.Item>
+            </>
+          )}
+          {selectedKind === 'glossary' && (
+            <Form.Item label='术语条目' required>
+              <Form.List name='terms'>
+                {(fields, { add, remove }) => (
+                  <Space direction='vertical' className='w-full' size='small'>
+                    {fields.map(field => (
+                      <Space key={field.key} align='start' className='w-full' wrap>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'term']}
+                          rules={[{ required: true, message: '请输入术语' }]}
+                          className='!mb-0 min-w-[150px] flex-1'
+                        >
+                          <Input placeholder='术语' />
+                        </Form.Item>
+                        <Form.Item
+                          {...field}
+                          name={[field.name, 'meaning']}
+                          rules={[{ required: true, message: '请输入术语含义' }]}
+                          className='!mb-0 min-w-[240px] flex-[2]'
+                        >
+                          <Input placeholder='业务含义' />
+                        </Form.Item>
+                        <Form.Item {...field} name={[field.name, 'aliasesText']} className='!mb-0 min-w-[180px] flex-1'>
+                          <Input placeholder='别名（逗号分隔）' />
+                        </Form.Item>
+                        <Button
+                          danger
+                          type='text'
+                          icon={<DeleteOutlined />}
+                          aria-label='删除术语'
+                          onClick={() => remove(field.name)}
+                        />
+                      </Space>
+                    ))}
+                    <Button type='dashed' icon={<PlusOutlined />} onClick={() => add({ aliasesText: '' })}>
+                      添加术语
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+            </Form.Item>
+          )}
+          {selectedKind === 'analysis_rule' && (
+            <>
+              <Form.Item name='ruleMetric' label='指标' rules={[{ required: true, message: '请输入指标' }]}>
+                <Input placeholder='例如：活跃无人机数量' />
+              </Form.Item>
+              <Form.Item name='ruleConditionsText' label='判断条件（每行一条）'>
+                <Input.TextArea
+                  rows={3}
+                  placeholder='例如：设备状态为 active&#10;按设备 SN 去重'
+                />
+              </Form.Item>
+              <Form.Item name='ruleGuidance' label='分析指导'>
+                <Input.TextArea rows={3} placeholder='描述异常判断、同比环比或报告输出要求' />
+              </Form.Item>
+              <Form.Item label='结果断言'>
+                <Typography.Paragraph type='secondary' className='text-xs'>
+                  按本次 SQL 返回列逐行验证。缺列或空结果会标记为未能校验，文字判断条件不会自动执行。
+                </Typography.Paragraph>
+                <Form.List name='ruleChecks'>
+                  {(fields, { add, remove }) => (
+                    <Space direction='vertical' className='w-full'>
+                      {fields.map(field => (
+                        <Card key={field.key} size='small'>
+                          <Space wrap align='start'>
+                            <Form.Item
+                              name={[field.name, 'column']}
+                              rules={[{ required: true, message: '请输入结果列名' }]}
+                            >
+                              <Input placeholder='SQL 结果列名' />
+                            </Form.Item>
+                            <Form.Item
+                              name={[field.name, 'operator']}
+                              rules={[{ required: true, message: '请选择比较方式' }]}
+                            >
+                              <Select className='min-w-[140px]' options={checkOperators} placeholder='比较方式' />
+                            </Form.Item>
+                            <Form.Item name={[field.name, 'valueText']}>
+                              <Input placeholder='期望值；范围/枚举用逗号分隔' />
+                            </Form.Item>
+                            <Button
+                              danger
+                              type='text'
+                              icon={<DeleteOutlined />}
+                              aria-label='删除结果断言'
+                              onClick={() => remove(field.name)}
+                            />
+                          </Space>
+                          <Space wrap align='start'>
+                            <Form.Item name={[field.name, 'severity']} className='!mb-0'>
+                              <Select
+                                className='min-w-[100px]'
+                                options={[
+                                  { value: 'error', label: '错误' },
+                                  { value: 'warning', label: '提醒' },
+                                ]}
+                              />
+                            </Form.Item>
+                            <Form.Item name={[field.name, 'message']} className='!mb-0'>
+                              <Input placeholder='判定说明，例如：金额不能为负' />
+                            </Form.Item>
+                          </Space>
+                        </Card>
+                      ))}
+                      <Button
+                        type='dashed'
+                        icon={<PlusOutlined />}
+                        onClick={() => add({ operator: 'gte', severity: 'error' })}
+                      >
+                        添加结果断言
+                      </Button>
+                    </Space>
+                  )}
+                </Form.List>
+              </Form.Item>
+              <Form.Item name='ruleReportRequirementsText' label='报告要求（每行一条）'>
+                <Input.TextArea rows={3} placeholder='例如：注明统计时间范围和单位；列出异常记录；注明引用口径' />
+              </Form.Item>
+            </>
+          )}
           <Form.Item name='aliasesText' label='别名 / 近义词'>
             <Input.TextArea rows={2} placeholder='每行一个，或用逗号分隔' />
           </Form.Item>
