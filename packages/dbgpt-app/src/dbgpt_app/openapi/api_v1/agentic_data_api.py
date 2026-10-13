@@ -1617,6 +1617,12 @@ async def _react_agent_stream_impl(
 - 使用 'sql_query' 工具执行 SQL 查询
 - **只允许 SELECT 查询，禁止 INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE**
 """
+            if getattr(database_connector, "mdl_enabled", False):
+                semantic_context = await run_in_threadpool(
+                    database_connector.get_semantic_context, user_input
+                )
+                if semantic_context:
+                    database_context += "\n" + semantic_context
             logger.info(
                 f"Loaded database connector: {database_name} "
                 f"(tables: {', '.join(table_names)})"

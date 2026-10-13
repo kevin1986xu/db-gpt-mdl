@@ -60,6 +60,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import MdlKnowledge from './MdlKnowledge';
 
 type SelectedModelState = Record<string, { enabled: boolean; columns: Record<string, boolean> }>;
 
@@ -1335,6 +1336,11 @@ function MdlWorkbench() {
                             </Col>
                           </Row>
                         ),
+                      },
+                      {
+                        key: 'knowledge',
+                        label: '知识库',
+                        children: <MdlKnowledge database={selectedDatabase} models={models} />,
                       },
                       {
                         key: 'policies',

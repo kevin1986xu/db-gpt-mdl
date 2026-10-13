@@ -56,6 +56,10 @@ The API key is loaded from `OPENAI_API_KEY` or the `openai_api_key` entry in
 is ignored by Git. Restart the service after changing model configuration or
 credentials. No embedding model is required for the local MDL workflow.
 
+Administrators can manage datasource-specific reviewed SQL examples and business
+rules in the MDL workbench. See [MDL knowledge](MDL_KNOWLEDGE.md) for the approval
+workflow, retrieval behavior, and local storage boundary.
+
 Useful commands:
 
 ```bash

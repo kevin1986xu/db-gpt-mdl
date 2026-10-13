@@ -128,6 +128,57 @@ export type MdlQueryResponse = {
   logical_sql?: string;
 };
 
+export type MdlKnowledgeKind = 'qa_sql' | 'business_rule';
+
+export type MdlKnowledgeStatus = 'draft' | 'approved';
+
+export type MdlKnowledgeEntry = {
+  id: string;
+  kind: MdlKnowledgeKind;
+  title: string;
+  question?: string;
+  content: string;
+  sql?: string;
+  aliases: string[];
+  models: Record<string, string[]>;
+  status: MdlKnowledgeStatus;
+  mdl_fingerprint?: string;
+  stale?: boolean;
+};
+
+export type MdlKnowledgeCorpus = {
+  database?: string;
+  revision?: number;
+  entries: MdlKnowledgeEntry[];
+};
+
+export type MdlKnowledgeSavePayload = {
+  database?: string;
+  revision?: number;
+  entries: MdlKnowledgeEntry[];
+};
+
+export type MdlKnowledgeApprovePayload = {
+  database?: string;
+  id: string;
+  revision?: number;
+};
+
+export type MdlKnowledgeSearchPayload = {
+  database?: string;
+  question: string;
+  top_k?: number;
+};
+
+export type MdlKnowledgeSearchMatch = MdlKnowledgeEntry & {
+  score?: number;
+};
+
+export type MdlKnowledgeSearchResponse = {
+  database?: string;
+  matches: MdlKnowledgeSearchMatch[];
+};
+
 export type MdlSessionUser = {
   username: string;
   role: string;
@@ -166,3 +217,18 @@ export const saveMdlPolicies = (data: MdlPoliciesResponse) =>
   PUT<MdlPoliciesResponse, MdlPoliciesResponse>('/api/v1/mdl/policies', data);
 
 export const queryMdl = (data: MdlQueryPayload) => POST<MdlQueryPayload, MdlQueryResponse>('/api/v1/mdl/query', data);
+
+export const getMdlKnowledge = (database?: string) =>
+  GET<{ database?: string } | undefined, MdlKnowledgeCorpus>(
+    '/api/v1/mdl/knowledge',
+    database ? { database } : undefined,
+  );
+
+export const saveMdlKnowledge = (data: MdlKnowledgeSavePayload) =>
+  PUT<MdlKnowledgeSavePayload, MdlKnowledgeCorpus>('/api/v1/mdl/knowledge', data);
+
+export const approveMdlKnowledge = (data: MdlKnowledgeApprovePayload) =>
+  POST<MdlKnowledgeApprovePayload, MdlKnowledgeCorpus>('/api/v1/mdl/knowledge/approve', data);
+
+export const searchMdlKnowledge = (data: MdlKnowledgeSearchPayload) =>
+  POST<MdlKnowledgeSearchPayload, MdlKnowledgeSearchResponse>('/api/v1/mdl/knowledge/search', data);

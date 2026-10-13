@@ -4,6 +4,9 @@ This repository extends DB-GPT with a Wren MDL workbench, datasource-specific
 saved models, authenticated access policies, and semantic SQL planning for chat
 and SQL validation. The upstream DB-GPT source and license are retained below.
 
+See [MDL question and business knowledge](docs/MDL_KNOWLEDGE.md) for reviewed SQL
+examples, business rules, and automatic permission-filtered retrieval.
+
 Start with the [MDL local runtime guide](docs/MDL_LOCAL_RUNTIME.md). It includes
 the demo configuration, dependency setup, model credentials, and test commands.
 Use the `dev` branch for ongoing development.
