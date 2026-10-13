@@ -30,9 +30,10 @@ def make_knowledge_retrieve(react_state: Dict[str, Any], knowledge_resources: Li
                 ensure_ascii=False,
             )
 
-        resource = knowledge_resources[0]
         try:
-            chunks = await resource.retrieve(query)
+            chunks = []
+            for resource in knowledge_resources:
+                chunks.extend(await resource.retrieve(query))
             if chunks:
                 # Cap per-chunk and total size so a few large chunks can't
                 # overflow the LLM context window. Larger outputs are

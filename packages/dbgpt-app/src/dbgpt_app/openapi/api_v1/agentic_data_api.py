@@ -1315,6 +1315,35 @@ async def _react_agent_stream_impl(
         )
         database_name = dialogue.ext_info.get("database_name")
 
+    from .mdlint.auth import current_principal as _mdl_principal
+
+    _mdl_user = _mdl_principal.get()
+    mdl_knowledge_spaces: List[str] = []
+    if database_name and _mdl_user:
+        try:
+            from .mdlint.knowledge_space import MdlKnowledgeSpaceService
+
+            space_service = MdlKnowledgeSpaceService()
+            if knowledge_space:
+                knowledge_space = space_service.authorize_space(
+                    str(knowledge_space),
+                    database=str(database_name),
+                    principal=_mdl_user,
+                )
+                mdl_knowledge_spaces = [knowledge_space]
+            else:
+                mdl_knowledge_spaces = space_service.authorized_spaces(
+                    str(database_name),
+                    _mdl_user,
+                )
+                knowledge_space = (
+                    mdl_knowledge_spaces[0] if mdl_knowledge_spaces else None
+                )
+        except Exception as e:
+            logger.warning("Failed to authorize MDL knowledge spaces: %s", e)
+            knowledge_space = None
+            mdl_knowledge_spaces = []
+
     # Connector selection (Task C): only inject user-selected connectors.
     connector_ids: List[str] = _parse_connector_ids(dialogue.ext_info)
 
@@ -1542,24 +1571,51 @@ async def _react_agent_stream_impl(
     # Step 3: Load knowledge space resource if specified in ext_info
     knowledge_resources: List[Any] = []
     knowledge_context = ""
-    if knowledge_space:
+    selected_knowledge_spaces = (
+        mdl_knowledge_spaces
+        if mdl_knowledge_spaces
+        else ([knowledge_space] if knowledge_space else [])
+    )
+    if selected_knowledge_spaces:
         try:
             from dbgpt_serve.agent.resource.knowledge import (
                 KnowledgeSpaceRetrieverResource,
             )
 
-            knowledge_resource = KnowledgeSpaceRetrieverResource(
-                name=f"knowledge_space_{knowledge_space}",
-                space_name=knowledge_space,
-                top_k=4,
-                system_app=CFG.SYSTEM_APP,
-            )
-            knowledge_resources.append(knowledge_resource)
+            loaded_space_names = []
+            for selected_space in selected_knowledge_spaces:
+                app_config = CFG.SYSTEM_APP.config.configs.get("app_config")
+                use_lexical = bool(_mdl_user) and not (
+                    app_config and app_config.models.default_embedding
+                )
+                knowledge_resource = None if use_lexical else (
+                    KnowledgeSpaceRetrieverResource(
+                        name=f"knowledge_space_{selected_space}",
+                        space_name=selected_space,
+                        top_k=4,
+                        system_app=CFG.SYSTEM_APP,
+                    )
+                )
+                if _mdl_user:
+                    from .mdlint.knowledge_space import (
+                        MdlAuthorizedKnowledgeResource,
+                    )
+
+                    knowledge_resource = MdlAuthorizedKnowledgeResource(
+                        delegate=knowledge_resource,
+                        database=str(database_name),
+                        principal=_mdl_user,
+                        space_name=str(selected_space),
+                    )
+                knowledge_resources.append(knowledge_resource)
+                loaded_space_names.append(
+                    knowledge_resource.retriever_name or str(selected_space)
+                )
             # resolve wiki visibility here (this block runs before the
             # tool-assembly block where kb_tool_list is built)
             from .tools.kb_tools import _wiki_enabled
 
-            wiki_available = _wiki_enabled(knowledge_space)
+            wiki_available = bool(knowledge_space) and _wiki_enabled(knowledge_space)
             codegraph_tools_desc = (
                 """
   - kb_codegraph_explore: Query code structure (classes, call chains, inheritance)
@@ -1577,26 +1633,33 @@ async def _react_agent_stream_impl(
                 if wiki_available
                 else ""
             )
-            knowledge_context = f"""
-## Knowledge Base
-- Knowledge space: {knowledge_resource.retriever_name or knowledge_space}
-- Description: {knowledge_resource.retriever_desc or "Knowledge retrieval available"}
-- Available tools:
-  - kb_ls: List files and directories in the knowledge base
+            if _mdl_user:
+                available_tools = (
+                    "  - knowledge_retrieve: Search authorized MDL-bound "
+                    "knowledge spaces"
+                )
+            else:
+                available_tools = f"""  - kb_ls: List files and directories in the knowledge base
   - kb_glob: Search files by name or glob pattern
   - kb_grep: Search file contents by keyword (prefer for exact matches)
   - kb_cat: Read the content of a specific file
-  - semantic_search: Semantic search (use when kb_grep returns insufficient results){codegraph_tools_desc}{wiki_tools_desc}
+  - semantic_search: Semantic search (use when kb_grep returns insufficient results){codegraph_tools_desc}{wiki_tools_desc}"""
+            knowledge_context = f"""
+## Knowledge Base
+- Knowledge space: {", ".join(loaded_space_names)}
+- Description: Knowledge retrieval available
+- Available tools:
+{available_tools}
 """
             logger.info(
-                f"Loaded knowledge space resource: {knowledge_space} "
-                f"(name: {knowledge_resource.retriever_name})"
+                "Loaded knowledge space resources: %s",
+                ", ".join(loaded_space_names),
             )
         except Exception as e:
             logger.warning(f"Failed to load knowledge space resource: {e}", exc_info=e)
             knowledge_context = f"""
 ## Knowledge Base
-- Warning: Failed to load knowledge space '{knowledge_space}'. Error: {str(e)}
+- Warning: Failed to load knowledge space. Error: {str(e)}
 """
 
     # Step 4: Load database connector if specified in ext_info
@@ -1617,6 +1680,12 @@ async def _react_agent_stream_impl(
 - 使用 'sql_query' 工具执行 SQL 查询
 - **只允许 SELECT 查询，禁止 INSERT/UPDATE/DELETE/DROP/ALTER/TRUNCATE**
 """
+            if getattr(database_connector, "mdl_enabled", False):
+                semantic_context = await run_in_threadpool(
+                    database_connector.get_semantic_context, user_input
+                )
+                if semantic_context:
+                    database_context += "\n" + semantic_context
             logger.info(
                 f"Loaded database connector: {database_name} "
                 f"(tables: {', '.join(table_names)})"
@@ -1628,11 +1697,16 @@ async def _react_agent_stream_impl(
 - 警告: 加载数据库 '{database_name}' 失败。错误: {str(e)}
 """
 
+    from .mdlint.auth import current_principal as _mdl_principal
+
     react_state: Dict[str, Any] = {
         "skills_loaded": True,  # Skills are pre-loaded now
         "matched": None,
         "skill_prompt": None,
         "file_path": file_path,
+        "database_name": database_name,
+        "user_input": user_input,
+        "mdl_principal": _mdl_principal.get(),
     }
 
     # Pre-select skill if skill_name provided in ext_info
@@ -2149,7 +2223,9 @@ print(json.dumps(summary, ensure_ascii=False))
     execute_tool_tool = make_execute_tool(react_state)
     # Knowledge tools: use kb_tools (kb_ls, kb_glob, kb_grep, kb_cat, semantic_search)
     # when a knowledge space is connected, otherwise fall back to knowledge_retrieve
-    if knowledge_space:
+    if _mdl_user and knowledge_resources:
+        kb_tool_list = [make_knowledge_retrieve(react_state, knowledge_resources)]
+    elif knowledge_space:
         kb_tool_list = make_kb_tools(knowledge_space)
         # Filter out codegraph tools when the space has no built code graph,
         # so the agent never sees tools it cannot use successfully.
@@ -2942,6 +3018,7 @@ Thought/Action/Action Input format shown above.
         tool_pack = ToolPack(
             [
                 sql_query_tool,
+                *kb_tool_list,
                 html_interpreter_tool,
                 todowrite_tool,
                 question_tool,
@@ -2949,7 +3026,7 @@ Thought/Action/Action Input format shown above.
             ]
         )
         workflow_prompt += (
-            "\nMDL 数据会话仅提供 sql_query、html_interpreter、todowrite、question、terminate。"
+            "\nMDL 数据会话仅提供 sql_query、受控知识检索、html_interpreter、todowrite、question、terminate。"
             "所有查询必须使用上面给出的语义模型和字段，"
             "不得调用代码、文件、脚本或其他数据源工具。"
         )
@@ -3665,6 +3742,13 @@ Thought/Action/Action Input format shown above.
     else:
         final_content = reply.content or ""
 
+    if getattr(database_connector, "mdl_enabled", False) or (
+        _mdl_user and _mdl_user["role"] != "admin"
+    ):
+        from .mdlint.query_evidence import ground_final_answer
+
+        final_content = ground_final_answer(str(final_content or ""), react_state)
+
     final_answer = final_answer_assembler.finalize(final_content)
 
     # Persist AI reply with structured history payload
@@ -3963,19 +4047,42 @@ async def chat_react_agent(
                 raise HTTPException(403, "无权访问其他用户的会话")
         if mdl_user["role"] != "admin":
             extra = dialogue.ext_info or {}
+            protected = os.getenv("DBGPT_MDL_DATABASE", "mdl_demo")
+            requested_knowledge_space = (
+                extra.get("knowledge_space")
+                or extra.get("knowledge_space_name")
+                or extra.get("knowledge_space_id")
+            )
+            allowed_knowledge_space = None
+            if requested_knowledge_space:
+                from .mdlint.errors import MdlPolicyError
+                from .mdlint.knowledge_space import authorize_mdl_knowledge_space
+
+                try:
+                    allowed_knowledge_space = await run_in_threadpool(
+                        authorize_mdl_knowledge_space,
+                        str(requested_knowledge_space),
+                        database=protected,
+                        principal=mdl_user,
+                    )
+                except MdlPolicyError as exc:
+                    raise HTTPException(403, str(exc)) from exc
             if any(
                 extra.get(key)
                 for key in (
-                    "file_path", "file_ids", "skill_name", "connector_ids",
-                    "connector_id", "knowledge_space", "knowledge_space_name",
-                    "knowledge_space_id",
+                    "file_path",
+                    "file_ids",
+                    "skill_name",
+                    "connector_ids",
+                    "connector_id",
                 )
             ) or getattr(dialogue, "file_ids", None):
                 raise HTTPException(403, "该账号仅允许使用 MDL 数据源问数")
-            protected = os.getenv("DBGPT_MDL_DATABASE", "mdl_demo")
             if extra.get("database_name") not in (None, "", protected):
                 raise HTTPException(403, "该账号只能访问已授权的 MDL 数据源")
             dialogue.ext_info = {"database_name": protected}
+            if allowed_knowledge_space:
+                dialogue.ext_info["knowledge_space"] = allowed_knowledge_space
     # Pre-flight: 400/404 surface before the stream (and agent) is built.
     attachment_ctx = await _open_turn_attachments(dialogue, user_token)
     headers = {

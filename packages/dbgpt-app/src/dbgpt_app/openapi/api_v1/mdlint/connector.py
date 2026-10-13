@@ -99,6 +99,19 @@ class MdlConnectorProxy:
         except Exception:
             return ""
 
+    def get_semantic_context(self, question: str) -> str:
+        from .prompt import build_mdl_context
+
+        principal = _require_current_principal()
+        _assert_same_principal(self._principal, principal)
+        return build_mdl_context(
+            self._service,
+            self._db_name,
+            principal,
+            question,
+            data_source=infer_wren_data_source(self._raw_connector),
+        )
+
     def table_simple_info(self):
         schema = self._visible_schema()
         return [
