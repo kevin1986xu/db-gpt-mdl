@@ -101,7 +101,13 @@ def validate_on_database(document, database: str | None = None):
             and not model.get("tableReference")
         ):
             model["tableReference"] = {"schema": schema_name, "table": model["table"]}
-    parsed = service.validate(document)
+    # An unsaved datasource is exposed as revision 0 so its first save can use
+    # 0 as the optimistic-concurrency baseline. Strict manifest parsing starts
+    # at revision 1, so validate a draft with a transient parser revision.
+    validation_document = document
+    if isinstance(document.get("revision"), int) and document["revision"] < 1:
+        validation_document = {**document, "revision": 1}
+    parsed = service.validate(validation_document)
     physical = set(raw.get_table_names())
     for model in parsed.raw.get("models", []):
         reference = model.get("tableReference", {})

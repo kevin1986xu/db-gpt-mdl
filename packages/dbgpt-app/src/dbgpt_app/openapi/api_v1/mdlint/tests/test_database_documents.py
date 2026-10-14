@@ -363,3 +363,43 @@ def test_empty_database_draft_supports_manual_model_wren_dry_plan(
         pytest.skip(str(exc))
 
     assert "manual_device" in planned
+
+
+def test_empty_database_draft_can_be_validated_before_first_save(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del tmp_path
+    seen_documents: list[dict] = []
+
+    class FakeService:
+        def validate(self, document):
+            seen_documents.append(document)
+            return type("Parsed", (), {"raw": {"models": []}, "raw_policies": []})()
+
+    class RawConnector:
+        db_type = "duckdb"
+
+        def get_table_names(self):
+            return []
+
+    monkeypatch.setattr(endpoints, "get_service", lambda: FakeService())
+    monkeypatch.setattr(
+        endpoints,
+        "manager",
+        lambda: type(
+            "Manager",
+            (),
+            {"_get_raw_connector": lambda self, _: RawConnector()},
+        )(),
+    )
+
+    document = {
+        "manifest": {"models": [], "relationships": []},
+        "policies": [],
+        "revision": 0,
+        "database": "manual",
+    }
+    endpoints.validate_on_database(document, database="manual")
+
+    assert seen_documents[0]["revision"] == 1
