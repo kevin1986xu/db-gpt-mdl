@@ -50,6 +50,9 @@ web process from the checked-out source tree. The local profile configures
 `deepseek/deepseek-v4.1-flash` through `https://api.hzlinkapi.com/v1`.
 The gateway accepts `deepseek-v4.1-flash` as its request model ID, so the profile
 uses DB-GPT's `backend` mapping while preserving the model name shown in the UI.
+The local helper automatically opens the MDL workbench as the generated `admin`
+account; no token entry is required. Set `DBGPT_MDL_AUTO_LOGIN=0` before starting
+if manual MDL login is needed.
 
 The API key is loaded from `OPENAI_API_KEY` or the `openai_api_key` entry in
 `.runtime/mdl/model_credentials.json`. Keep this file at mode `0600`; `.runtime/`

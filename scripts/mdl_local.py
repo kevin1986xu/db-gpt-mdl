@@ -51,6 +51,9 @@ def runtime_env() -> dict[str, str]:
     existing = env.get("PYTHONPATH")
     env["PYTHONPATH"] = source_path() + (os.pathsep + existing if existing else "")
     env["DBGPT_MDL_ENABLED"] = "1"
+    # The local demo owns the generated credentials, so the workbench can open
+    # as admin without exposing the random token in the browser bundle.
+    env["DBGPT_MDL_AUTO_LOGIN"] = env.get("DBGPT_MDL_AUTO_LOGIN", "1")
     model_api_key = env.get("OPENAI_API_KEY", "")
     if not model_api_key and MODEL_CREDENTIALS.exists():
         try:

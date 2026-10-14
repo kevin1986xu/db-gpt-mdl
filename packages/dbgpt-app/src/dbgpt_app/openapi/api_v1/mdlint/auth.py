@@ -47,6 +47,17 @@ def initialize_credentials() -> Path:
     return path
 
 
+def admin_token() -> Optional[str]:
+    """Return the locally generated admin token for trusted auto-login flows."""
+    path = initialize_credentials()
+    try:
+        accounts = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    token = accounts.get("admin") if isinstance(accounts, dict) else None
+    return token if isinstance(token, str) else None
+
+
 def authenticate(token: str) -> Optional[dict]:
     path = credentials_path()
     if not token or not path.exists():

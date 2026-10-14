@@ -1,5 +1,6 @@
 """MDL management inside the existing DB-GPT API and connector chain."""
 
+import os
 import time
 from copy import deepcopy
 from typing import Any
@@ -9,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .auth import (
     COOKIE,
+    admin_token,
     authenticate,
     current_principal,
     enabled,
@@ -193,10 +195,22 @@ def _prune_policies_for_manifest(document: dict[str, Any]) -> None:
 
 
 @router.get("/session")
-def session():
+def session(response: Response):
     if enabled():
         initialize_credentials()
-    return result({"user": current_principal.get(), "enabled": enabled()})
+    principal = current_principal.get()
+    if (
+        enabled()
+        and os.getenv("DBGPT_MDL_AUTO_LOGIN") == "1"
+        and (principal is None or principal.get("role") != "admin")
+    ):
+        token = admin_token()
+        principal = authenticate(token) if token else None
+        if token and principal and principal.get("role") == "admin":
+            response.set_cookie(
+                COOKIE, token, httponly=True, samesite="strict", max_age=28800
+            )
+    return result({"user": principal, "enabled": enabled()})
 
 
 @router.post("/login")
