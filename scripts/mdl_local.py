@@ -30,6 +30,7 @@ MODEL_CREDENTIALS = RUNTIME / "model_credentials.json"
 CONFIG = ROOT / "configs" / "dbgpt-mdl.toml"
 MDL = ROOT / "configs" / "mdl.json"
 MDL_EXAMPLE = ROOT / "configs" / "mdl.example.json"
+PILOT_META_DATA = ROOT / "pilot" / "meta_data"
 PYTHON = ROOT / ".venv" / "bin" / "python"
 
 SOURCE_PATHS = [
@@ -44,6 +45,22 @@ SOURCE_PATHS = [
 
 def source_path() -> str:
     return os.pathsep.join(str(path) for path in SOURCE_PATHS)
+
+
+def service_url(name: str, default_port: int) -> str:
+    with CONFIG.open("rb") as stream:
+        config = tomllib.load(stream)
+    service: object = config.get("service", {})
+    for part in name.split("."):
+        if not isinstance(service, dict):
+            service = {}
+            break
+        service = service.get(part, {})
+    if not isinstance(service, dict):
+        service = {}
+    host = str(service.get("host", "127.0.0.1"))
+    port = int(service.get("port", default_port))
+    return f"http://{host}:{port}"
 
 
 def runtime_env() -> dict[str, str]:
@@ -147,6 +164,20 @@ def initialize_mdl_manifest() -> None:
     shutil.copyfile(MDL_EXAMPLE, MDL)
 
 
+def initialize_pilot_metadata() -> None:
+    """Provision Alembic templates for editable source checkouts."""
+    if not PILOT_META_DATA.is_dir():
+        return
+    RUNTIME.mkdir(parents=True, exist_ok=True)
+    for source in PILOT_META_DATA.rglob("*"):
+        if not source.is_file():
+            continue
+        target = RUNTIME / source.relative_to(PILOT_META_DATA)
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
 def initialize_metadata() -> None:
     RUNTIME.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(METADATA_DB) as conn:
@@ -191,6 +222,7 @@ def setup(_: argparse.Namespace) -> None:
     initialize_mdl_manifest()
     initialize_database(DEMO_DB)
     initialize_credentials()
+    initialize_pilot_metadata()
     initialize_metadata()
     print(f"Demo database: {DEMO_DB}")
     print(f"DB-GPT metadata: {METADATA_DB}")
@@ -243,7 +275,7 @@ def read_controller_pid() -> int | None:
 def status(_: argparse.Namespace) -> None:
     pid = read_pid()
     if pid and is_running(pid):
-        print(f"running pid={pid} url=http://127.0.0.1:18765")
+        print(f"running pid={pid} url={service_url('web', 18765)}")
         return
     print("stopped")
 
@@ -252,7 +284,7 @@ def start(args: argparse.Namespace) -> None:
     setup(args)
     pid = read_pid()
     if pid and is_running(pid):
-        print(f"already running pid={pid} url=http://127.0.0.1:18765")
+        print(f"already running pid={pid} url={service_url('web', 18765)}")
         return
     env = runtime_env()
     with CONFIG.open("rb") as stream:
@@ -304,7 +336,7 @@ def start(args: argparse.Namespace) -> None:
             if process.poll() is not None:
                 PID_FILE.unlink(missing_ok=True)
             raise
-    print(f"started pid={process.pid} url=http://127.0.0.1:18765 log={LOG_FILE}")
+    print(f"started pid={process.pid} url={service_url('web', 18765)} log={LOG_FILE}")
 
 
 def stop(_: argparse.Namespace) -> None:
@@ -341,7 +373,7 @@ def wait_for_controller(timeout: int, pid: int) -> None:
             break
         try:
             with urllib.request.urlopen(
-                "http://127.0.0.1:18766/api/health", timeout=2
+                f"{service_url('model.controller', 18766)}/api/health", timeout=2
             ) as response:
                 if response.status < 500:
                     return
@@ -380,7 +412,7 @@ def wait_until_ready(timeout: int, pid: int) -> None:
             )
         try:
             with urllib.request.urlopen(
-                "http://127.0.0.1:18765/api/v1/mdl/session", timeout=2
+                f"{service_url('web', 18765)}/api/v1/mdl/session", timeout=2
             ) as response:
                 if response.status < 500:
                     time.sleep(0.5)
