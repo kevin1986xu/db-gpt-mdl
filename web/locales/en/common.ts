@@ -1,3 +1,5 @@
+import { PRODUCT_NAME } from '@/utils/brand';
+
 export const CommonEn = {
   Knowledge_Space: 'Knowledge',
   space: 'space',
@@ -105,8 +107,7 @@ export const CommonEn = {
   Show_Sidebar: 'UnFold',
   language: 'Language',
   choose_model: 'Please choose a model',
-  data_center_desc:
-    'DB-GPT also offers a user-friendly data center management interface for efficient data maintenance.',
+  data_center_desc: `${PRODUCT_NAME} also offers a user-friendly data center management interface for efficient data maintenance.`,
   create_database: 'Create Database',
   create_knowledge: 'Create Knowledge',
   path: 'Path',
@@ -172,8 +173,7 @@ export const CommonEn = {
   provider_desc_github_copilot:
     'Requires a Copilot subscription. Sign in with GitHub (device flow); credentials are managed and refreshed automatically',
   copilot_visit_prompt: 'Visit',
-  copilot_visit_prompt_suffix:
-    'and enter the code below to connect your account and use GitHub Copilot models in DB-GPT.',
+  copilot_visit_prompt_suffix: `and enter the code below to connect your account and use GitHub Copilot models in ${PRODUCT_NAME}.`,
   copilot_code_label: 'Confirmation code',
   waiting_authorization: 'Waiting for authorization...',
   copied_code: 'Copied',
@@ -459,9 +459,9 @@ export const CommonEn = {
   publish_desc: 'Are you sure about releasing the application?',
   unPublish_desc: 'Are you sure you want to unpublish this application?',
   published_success: 'Published Success',
-  dbgpts_community: 'DBGPTS Community',
-  community_dbgpts: 'Community DBGPTS',
-  my_dbgpts: 'My DBGPTS',
+  dbgpts_community: 'Open-source App Community',
+  community_dbgpts: 'Community Apps',
+  my_dbgpts: 'My Apps',
   Refresh_dbgpts: 'Refresh from the community Git repository',
   workflow: 'Workflow',
   resources: 'Resources',
@@ -548,7 +548,7 @@ export const CommonEn = {
   evaluation_env_test: 'Test Set',
   evaluation_env_dev_tooltip: 'Dataset for local development, validation and debugging',
   evaluation_env_test_tooltip: 'Dataset for official evaluation and leaderboard ranking',
-  home_title: 'DB-GPT AI Data Assistant',
+  home_title: PRODUCT_NAME,
   home_subtitle: 'Agentic Data Driven Decisions',
   release_to_add_files: 'Release to add files',
   supported_file_formats: 'Supports',
@@ -944,8 +944,7 @@ export const CommonEn = {
   stop: 'Stop',
   chat_error: 'Sorry, an error occurred. Please try again.',
   // ── request.ts error tips ──
-  'request.error.network':
-    'Cannot connect to DB-GPT service: network unreachable (possibly CORS restriction or service not running). Please check cors_allowed_origins config and whether the service is up.',
+  'request.error.network': `Cannot connect to ${PRODUCT_NAME} service: network unreachable (possibly CORS restriction or service not running). Please check cors_allowed_origins config and whether the service is up.`,
   'request.error.timeout': 'Request timed out, please try again later.',
   'request.error.default': 'Request failed (HTTP {{status}}).',
   'editor.please_select_database': 'Please select a database first',

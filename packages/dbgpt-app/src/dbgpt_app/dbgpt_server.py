@@ -45,8 +45,8 @@ ROOT_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 sys.path.append(ROOT_PATH)
 
 app = create_app(
-    title=_("DB-GPT Open API"),
-    description=_("DB-GPT Open API"),
+    title=_("数智工坊 Open API"),
+    description=_("数智工坊开放接口"),
     version=version,
     openapi_tags=[],
 )

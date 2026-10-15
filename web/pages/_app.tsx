@@ -2,6 +2,7 @@ import { ChatContext, ChatContextProvider } from '@/app/chat-context';
 import SideBar from '@/components/layout/side-bar';
 import { NewTaskProvider } from '@/modules/new-task';
 import FloatHelper from '@/new-components/layout/FloatHelper';
+import { PRODUCT_NAME } from '@/utils/brand';
 import { STORAGE_LANG_KEY, STORAGE_USERINFO_KEY, STORAGE_USERINFO_VALID_TIME_KEY } from '@/utils/constants/index';
 import { App, ConfigProvider, MappingAlgorithm, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
@@ -47,6 +48,10 @@ function CssWrapper({ children }: { children: React.ReactElement }) {
 
   return (
     <div>
+      <Head>
+        <title>{PRODUCT_NAME}</title>
+        <meta name='application-name' content={PRODUCT_NAME} />
+      </Head>
       {/* <TopProgressBar /> */}
       {children}
     </div>

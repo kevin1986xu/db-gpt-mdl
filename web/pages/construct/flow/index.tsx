@@ -4,6 +4,7 @@ import MyEmpty from '@/components/common/MyEmpty';
 import BlurredCard, { ChatButton, InnerDropdown } from '@/new-components/common/blurredCard';
 import ConstructLayout from '@/new-components/layout/Construct';
 import { IFlow, IFlowUpdateParam } from '@/types/flow';
+import { PRODUCT_NAME } from '@/utils/brand';
 import { PlusOutlined } from '@ant-design/icons';
 import { useRequest } from 'ahooks';
 import { Button, Checkbox, Form, Input, Modal, Pagination, Popconfirm, Spin, Tag, message } from 'antd';
@@ -222,7 +223,9 @@ function Flow() {
                 rightTopHover={false}
                 Tags={
                   <div>
-                    <Tag color={flow.source === 'DBGPT-WEB' ? 'green' : 'blue'}>{flow.source}</Tag>
+                    <Tag color={flow.source === 'DBGPT-WEB' ? 'green' : 'blue'}>
+                      {flow.source === 'DBGPT-WEB' ? PRODUCT_NAME : flow.source}
+                    </Tag>
                     {flow.define_type && <Tag color={'purple'}>{flow.define_type}</Tag>}
                     <Tag color={flow.editable ? 'green' : 'gray'}>{flow.editable ? 'Editable' : 'Can not Edit'}</Tag>
                     <Tag color={flow.state === 'load_failed' ? 'red' : flow.state === 'running' ? 'green' : 'blue'}>

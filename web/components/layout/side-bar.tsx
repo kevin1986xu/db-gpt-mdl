@@ -1,10 +1,10 @@
 import { ChatContext } from '@/app/chat-context';
 import { delDialogue, getDialogueList } from '@/client/api/request';
 import { apiInterceptors } from '@/client/api/tools/interceptors';
-import { DarkSvg, ModelSvg, SunnySvg } from '@/components/icons';
+import { ModelSvg } from '@/components/icons';
 import { useStartNewTask } from '@/modules/new-task';
 import type { IChatDialogueSchema } from '@/types/chat';
-import { STORAGE_LANG_KEY, STORAGE_THEME_KEY } from '@/utils/constants/index';
+import { PRODUCT_ICON, PRODUCT_LOGO, PRODUCT_LOGO_DARK, PRODUCT_NAME } from '@/utils/brand';
 import Icon, {
   ApartmentOutlined,
   ApiOutlined,
@@ -12,7 +12,6 @@ import Icon, {
   DashboardOutlined,
   DeleteOutlined,
   DeploymentUnitOutlined,
-  GlobalOutlined,
   LineChartOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -65,7 +64,7 @@ function SidebarPictureIcon({
 }
 
 function SideBar() {
-  const { isMenuExpand, setIsMenuExpand, mode, setMode } = useContext(ChatContext);
+  const { isMenuExpand, setIsMenuExpand, mode } = useContext(ChatContext);
   const router = useRouter();
   const { pathname } = router;
   const sidebarChatMode = Array.isArray(router.query.chat_mode) ? router.query.chat_mode[0] : router.query.chat_mode;
@@ -85,7 +84,7 @@ function SideBar() {
     pathname.startsWith('/observability');
   const { t, i18n } = useTranslation();
   const startNewTask = useStartNewTask();
-  const [logo, setLogo] = useState<string>('/logo_zh_latest.png');
+  const [logo, setLogo] = useState<string>(PRODUCT_LOGO);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dialogueList, setDialogueList] = useState<IChatDialogueSchema[]>([]);
   const [loadingDialogues, setLoadingDialogues] = useState(false);
@@ -143,20 +142,6 @@ function SideBar() {
   const handleToggleMenu = useCallback(() => {
     setIsMenuExpand(!isMenuExpand);
   }, [isMenuExpand, setIsMenuExpand]);
-
-  const handleToggleTheme = useCallback(() => {
-    const theme = mode === 'light' ? 'dark' : 'light';
-    setMode(theme);
-    localStorage.setItem(STORAGE_THEME_KEY, theme);
-  }, [mode, setMode]);
-
-  const handleChangeLang = useCallback(() => {
-    const language = i18n.language === 'en' ? 'zh' : 'en';
-    i18n.changeLanguage(language);
-    if (language === 'zh') moment.locale('zh-cn');
-    if (language === 'en') moment.locale('en');
-    localStorage.setItem(STORAGE_LANG_KEY, language);
-  }, [i18n]);
 
   const functions = useMemo(() => {
     const items: RouteItem[] = [
@@ -294,7 +279,7 @@ function SideBar() {
   }, [i18n.language]);
 
   useEffect(() => {
-    setLogo(mode === 'dark' ? '/logo_s_latest.png' : '/logo_zh_latest.png');
+    setLogo(mode === 'dark' ? PRODUCT_LOGO_DARK : PRODUCT_LOGO);
   }, [mode]);
 
   useEffect(() => {
@@ -314,7 +299,7 @@ function SideBar() {
         <div>
           <div className='flex flex-col items-center pb-2'>
             <Link href='/' className='flex justify-center items-center pb-2'>
-              <Image src='/LOGO_SMALL.png' alt='DB-GPT' width={40} height={40} />
+              <Image src={PRODUCT_ICON} alt={PRODUCT_NAME} width={40} height={40} />
             </Link>
             <Tooltip title={t('Show_Sidebar') || '展开侧栏'} placement='right'>
               <div
@@ -379,7 +364,7 @@ function SideBar() {
       {/* LOGO + Collapse Toggle */}
       <div className='flex items-center justify-between p-2 pb-4'>
         <Link href='/' className='flex items-center'>
-          <Image src={logo} alt='DB-GPT' width={140} height={32} />
+          <Image src={logo} alt={PRODUCT_NAME} width={140} height={32} />
         </Link>
         <Tooltip title={t('Close_Sidebar') || '收起侧栏'}>
           <div
@@ -485,7 +470,7 @@ function SideBar() {
         )}
       </div>
 
-      {/* Bottom: Settings + toggles */}
+      {/* 底部保留设置与侧栏折叠入口。 */}
       <div className='pt-4 pb-2'>
         {/* Settings */}
         <Popover
@@ -510,16 +495,6 @@ function SideBar() {
           </div>
         </Popover>
         <div className='flex items-center justify-around py-4 mt-2 border-t border-dashed border-gray-200 dark:border-gray-700'>
-          <Popover content={mode === 'dark' ? 'Light' : 'Dark'}>
-            <div className='flex-1 flex items-center justify-center cursor-pointer text-xl' onClick={handleToggleTheme}>
-              {mode === 'dark' ? <Icon component={DarkSvg} /> : <Icon component={SunnySvg} />}
-            </div>
-          </Popover>
-          <Popover content={t('language')}>
-            <div className='flex-1 flex items-center justify-center cursor-pointer text-xl' onClick={handleChangeLang}>
-              <GlobalOutlined />
-            </div>
-          </Popover>
           <Popover content={t(isMenuExpand ? 'Close_Sidebar' : 'Show_Sidebar')}>
             <div className='flex-1 flex items-center justify-center cursor-pointer text-xl' onClick={handleToggleMenu}>
               {isMenuExpand ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}

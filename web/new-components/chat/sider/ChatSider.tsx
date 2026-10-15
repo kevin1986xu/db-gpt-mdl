@@ -1,6 +1,7 @@
 import { ChatContext } from '@/app/chat-context';
 import { apiInterceptors, delDialogue } from '@/client/api';
 import { IChatDialogueSchema } from '@/types/chat';
+import { PRODUCT_ICON, PRODUCT_NAME } from '@/utils/brand';
 import { CaretLeftOutlined, CaretRightOutlined, DeleteOutlined, ShareAltOutlined } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import { Flex, Layout, Modal, Spin, Tooltip, Typography, message } from 'antd';
@@ -212,7 +213,7 @@ const ChatSider: React.FC<{
             item={{
               label: t('assistant'),
               key: 'default',
-              icon: <Image src='/LOGO_SMALL.png' alt='default' width={24} height={24} className='flex-1' />,
+              icon: <Image src={PRODUCT_ICON} alt={PRODUCT_NAME} width={24} height={24} className='flex-1' />,
               default: true,
             }}
             order={order}

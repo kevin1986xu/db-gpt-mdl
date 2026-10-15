@@ -1,4 +1,5 @@
-import { createCache, StyleProvider } from '@ant-design/cssinjs';
+import { PRODUCT_DESCRIPTION, PRODUCT_NAME } from '@/utils/brand';
+import { StyleProvider, createCache } from '@ant-design/cssinjs';
 import Document, { DocumentContext, Head, Html, Main, NextScript } from 'next/document';
 import { doExtraStyle } from '../genAntdCss';
 
@@ -37,10 +38,12 @@ class MyDocument extends Document {
     return (
       <Html lang='en'>
         <Head>
-          <link rel='icon' href='/favicon.ico' />
-          <meta name='description' content='Revolutionizing Database Interactions with Private LLM Technology' />
-          <meta property='og:description' content='eosphoros-ai' />
-          <meta property='og:title' content='DB-GPT' />
+          <link rel='icon' href='/favicon.ico?v=shuzhi-workshop' />
+          <link rel='icon' type='image/svg+xml' href='/brand/icon.svg' />
+          <meta name='description' content={PRODUCT_DESCRIPTION} />
+          <meta property='og:description' content={PRODUCT_DESCRIPTION} />
+          <meta property='og:title' content={PRODUCT_NAME} />
+          <meta property='og:site_name' content={PRODUCT_NAME} />
         </Head>
         <body>
           <Main />

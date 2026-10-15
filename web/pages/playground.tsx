@@ -1,4 +1,5 @@
 import { ChatPage, ChatTurn, ContentPart, SlashCommand } from '@/new-components/chat';
+import { PRODUCT_NAME } from '@/utils/brand';
 import React, { useCallback, useRef, useState } from 'react';
 
 const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -199,7 +200,7 @@ const PlaygroundPage: React.FC = () => {
         turns={turns}
         isLoading={isGenerating}
         modelName='GPT-4'
-        title='DB-GPT Playground'
+        title={`${PRODUCT_NAME} Playground`}
         onSendMessage={handleSendMessage}
         onStopGeneration={handleStopGeneration}
         onNewChat={handleNewChat}

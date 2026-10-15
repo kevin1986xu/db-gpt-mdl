@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="数智工坊">
+  <rect width="64" height="64" rx="14" fill="#0f766e" />
+  <polygon points="15,15 49,15 49,44 32,44 22,52 22,44 15,44" fill="#ffffff" />
+  <rect x="19" y="19" width="26" height="21" rx="2" fill="#0f766e" />
+  <rect x="24" y="24" width="4" height="4" rx="1" fill="#ffffff" />
+  <rect x="32" y="24" width="8" height="4" rx="1" fill="#ffffff" />
+  <rect x="24" y="32" width="4" height="4" rx="1" fill="#ffffff" />
+  <rect x="32" y="32" width="8" height="4" rx="1" fill="#ffffff" />
+</svg>

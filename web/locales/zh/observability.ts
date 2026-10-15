@@ -1,5 +1,5 @@
 export const ObservabilityZh = {
-  observability: '可观测',
+  observability: '运行监控',
   observability_overview: '可观测 · 总览',
   observability_traces: '可观测 · 链路',
   observability_last_24h: '最近 24 小时',

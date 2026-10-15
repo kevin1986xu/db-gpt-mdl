@@ -19,6 +19,7 @@ import {
 import { getDbList } from '@/client/api/request';
 import { apiInterceptors } from '@/client/api/tools/interceptors';
 import type { IChatDbSchema } from '@/types/db';
+import { PRODUCT_NAME } from '@/utils/brand';
 import {
   CheckCircleOutlined,
   DeleteOutlined,
@@ -1034,7 +1035,7 @@ function MdlWorkbench() {
             type='info'
             showIcon
             message='请输入本地 MDL 管理 token'
-            description='登录后，cookie 会用于 DB-GPT 的 MDL 查询和配置权限校验。'
+            description='登录后，cookie 会用于问数查询和配置权限校验。'
           />
           <Space.Compact block>
             <Input.Password
@@ -1054,9 +1055,9 @@ function MdlWorkbench() {
             <div>
               <div className='flex items-center gap-2 text-xl font-semibold text-gray-900 dark:text-gray-100'>
                 <FileTextOutlined className='text-blue-600' />
-                WrenAI MDL 语义模型
+                问数配置
               </div>
-              <div className='text-sm text-gray-500 mt-1'>管理 DB-GPT 可读取的模型、字段、关联关系和用户策略</div>
+              <div className='text-sm text-gray-500 mt-1'>管理{PRODUCT_NAME}可查询的数据、字段、关联关系和访问权限</div>
             </div>
             <Space wrap>
               {isAdmin && dataSources.length > 0 && (
@@ -1339,7 +1340,7 @@ function MdlWorkbench() {
                       },
                       {
                         key: 'knowledge',
-                        label: '知识库',
+                        label: '问数知识',
                         children: <MdlKnowledge database={selectedDatabase} models={models} />,
                       },
                       {
